@@ -29,8 +29,12 @@ class BaseballTest extends FlatSpec with Matchers {
     Bases.processAtBat(HomeRun,basesLoaded,Player("batter")) shouldBe
       AtBatOutcome(Player("batter"),Bases(),4)
   }
-  "Bases" should "score run and be on first if single" in {
+  "Bases" should "Score run and be on first if single" in {
     Bases.processAtBat(Single,Bases(third = Some(Player("2"))),Player("batter")) shouldBe
       AtBatOutcome(Player("batter"),Bases(first = Some(Player("batter"))),1)
+  }
+
+  "Game" should "Not play bottom of last inning if home is winning" in {
+//    val
   }
 }
