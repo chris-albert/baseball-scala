@@ -1,10 +1,8 @@
 package com.creasetoph
 
-import com.creasetoph.Baseball.Player
+import com.creasetoph.Baseball.{Team,Player}
 
 object Teams {
-
-  case class Team(name: String,players: List[Player])
 
   val teamFame = Team("FAME",List(
     Player("Chris"),

@@ -1,117 +1,103 @@
 package com.creasetoph
 
-import com.creasetoph.Teams.Team
 
 object Baseball {
 
-  def randomProbability = {math.random < .15}
+  type AtBatProbability = Player => AtBat
 
-  def main(args: Array[String]): Unit = {
-    val game = Game(Teams.teamFame,Teams.teamOps)
-    val endGame = Game.simulateGame(game,randomProbability)
-    println(Game.boxScore(endGame))
+  case class Team(name: String,players: List[Player])
+
+  case class Player(name: String)
+
+  trait AtBat
+  case class Hit(bases: Int) extends AtBat
+  case object Out extends AtBat
+
+  case class AtBatOutcome(player: Player,bases: Bases,runs: Int = 0,
+                          outs: Int = 0,numBases: Int = 0) {
+    def gotHit: Boolean = numBases > 0
   }
 
-  case class Player(name: String,atBats: Int = 0,hits: Int = 0,money: Int = 0) {
-    def gotHit = this.copy(atBats = atBats + 1,hits = hits + 1)
-    def madeOut = this.copy(atBats = atBats + 1)
-    def atBat(probability: => Boolean) = if(probability) gotHit else madeOut
-    def battingAverage: Double = if(hits == 0) 0 else hits / atBats.toDouble
-    def battingAverageFormat: String = battingAverage.formatted("%.3f")
-  }
-  
-  case class GameTeam(team: Team,
-                      currentPlayer: Int = 0,
-                      innings: List[Inning] = List()) {
-    def atBat(probability: => Boolean): GameTeam = {
-      val newPlayers = team.players.zipWithIndex.map {
-        case (player,index) =>
-          if(index == currentPlayer)
-            if(probability) player.gotHit else player.madeOut
-          else player
+  case class Bases(first: Option[Player] = None,
+                   second: Option[Player] = None,
+                   third: Option[Player] = None)
+
+  object Bases {
+    def processAtBat(atBat: AtBat,bases: Bases,batter: Player): AtBatOutcome =
+      atBat match {
+        case Hit(b) => advanceRunners(bases,b,batter)
+        case Out    => AtBatOutcome(batter,bases,0,1,0)
       }
-      val nextPlayer = if(currentPlayer == team.players.length) 0 else currentPlayer + 1
-      this.copy(team = team.copy(players = newPlayers),currentPlayer = nextPlayer)
-    }
 
+    def advanceRunners(bases: Bases,totalBases: Int, batter: Player): AtBatOutcome = {
+      def run(b: Bases,numBases: Int,runs: Int,fromBox: Option[Player]): AtBatOutcome =
+        if(numBases == 0) AtBatOutcome(batter,b,runs,0,totalBases)
+        else run(Bases(fromBox,b.first,b.second),numBases - 1,if(b.third.isDefined) runs + 1 else runs,None)
+      run(bases,totalBases,0,Some(batter))
+    }
+  }
+
+  case class GameTeam(team: Team,lineup: List[Player],innings: List[Inning] = List()) {
     def runs: Int = innings.foldLeft(0)(_ + _.runs)
+    def hits: Int = innings.foldLeft(0)(_ + _.hits)
+    def batter: Player = lineup.head
+    def next: GameTeam = this.copy(lineup = if(lineup.isEmpty) team.players else lineup.tail)
   }
-  
-  object GameTeam {
-    def simulateAtBat(team: GameTeam,inning: Inning,
-                      probability: => Boolean): (GameTeam,Inning) =
-      team.atBat(probability) -> inning.atBat(probability)
 
-    def simulateInning(team: GameTeam,
-                       inning: Inning,
-                       probability: => Boolean): GameTeam = {
-      def bat(t: GameTeam,i: Inning): (GameTeam,Inning) =
-        i match {
-          case Inning(_,3,_) => t -> i
-          case _ =>
-            val a = simulateAtBat(t,i,probability)
-            bat(a._1,a._2)
+  object GameTeam {
+    def apply(team: Team): GameTeam = GameTeam(team,team.players)
+  }
+
+  case class Inning(outcomes: List[AtBatOutcome] = List()) {
+    def isOver: Boolean = outs == 3
+    def runs: Int = outcomes.foldLeft(0)(_ + _.runs)
+    def outs: Int = outcomes.foldLeft(0)(_ + _.outs)
+    def hits: Int = outcomes.foldLeft(0){case (acc,out) => if(out.gotHit) acc + 1 else acc}
+  }
+
+  case class Game(home: GameTeam,away: GameTeam)
+
+  object Game {
+    def apply(home: Team,away: Team): Game = Game(GameTeam(home),GameTeam(away))
+
+    def play(game: Game,probability: AtBatProbability): Game = {
+      logAtBatHeaders()
+      playInnings(game.away,game.home,probability)
+    }
+
+    def playInnings(away: GameTeam,home: GameTeam,probability: AtBatProbability): Game = {
+      if(home.innings.length >= 9 && home.runs != away.runs) //Game is over
+        Game(home,away)
+      else if(away.innings.length >= 9 && home.runs > away.runs) //Game is over
+        Game(home,away)
+      else
+        playInnings(
+          playHalfInning(Inning(),away,probability),
+          playHalfInning(Inning(),home,probability),
+          probability
+        )
+    }
+
+    def playHalfInning(i: Inning,gameTeam: GameTeam,probability: AtBatProbability): GameTeam = {
+      def bat(inning: Inning,bases: Bases,newTeam: GameTeam): GameTeam = {
+        if(inning.isOver) gameTeam.copy(innings = inning :: gameTeam.innings)
+        else {
+          val batter = gameTeam.batter
+          val outcome = Bases.processAtBat(probability(batter),bases,batter)
+          logAtBat(gameTeam,outcome)
+          bat(inning.copy(outcomes = outcome :: inning.outcomes),outcome.bases,newTeam.next)
         }
-      val (newTeam,newInning) = bat(team,inning)
-      newTeam.copy(innings = newInning :: newTeam.innings)
+      }
+      bat(i,Bases(),gameTeam)
     }
   }
 
-  case class Inning(runs: Int = 0,
-                    outs: Int = 0,
-                    baseRunners: Int = 0) {
-    def isBasesLoaded: Boolean = baseRunners == 3
-    def isOver: Boolean = outs == 3
-    def gotHit: Inning = this.copy(runs = runs + 1,outs,baseRunners)
-    def madeOut: Inning = this.copy(runs,outs = outs + 1,baseRunners)
-    def atBat(probability: => Boolean) = if(probability) gotHit else madeOut
+  val shouldLog = true
+
+  def logAtBatHeaders() =
+    if(shouldLog) println(Printer.atBatHeader)
+
+  def logAtBat(gameTeam: GameTeam,outcome: AtBatOutcome): Unit = {
+    if(shouldLog) println(Printer.atBat(gameTeam,outcome))
   }
-
-  case class Game(home: GameTeam,
-                  away: GameTeam)
-
-   object Game {
-
-     def apply(home: Team,away: Team): Game =
-       Game(GameTeam(home),GameTeam(away))
-
-     def simulateGame(game: Game,probability: => Boolean): Game = {
-       def playInning(inning: Int,game: Game): Game = {
-         if(inning <= 9 || game.home.runs == game.away.runs) {
-           val home = GameTeam.simulateInning(game.home,Inning(),probability)
-           val away = GameTeam.simulateInning(game.away,Inning(),probability)
-           playInning(inning + 1,Game(home,away))
-         } else game
-       }
-       playInning(1,game)
-     }
-
-     def getBoxLine(team: String,innings: List[Int] = List(),
-                    runs: String = "",hits: String = ""): String = {
-       val i = innings.map(i => f"$i%2s").mkString("|")
-       f"|$team%10s|$i|$runs%5s|$hits%5s|"
-     }
-
-     def boxScore(game: Game): String = {
-       val header = getBoxLine("Team",List.range(1,game.away.innings.length + 1),"Runs","Hits")
-       val border = (0 until header.length).map(_ => "-").mkString
-       List(
-         border,
-         header,
-         border,
-         getBoxLine(game.away.team.name,game.away.innings.map(_.runs),game.away.runs.toString),
-         getBoxLine(game.home.team.name,game.home.innings.map(_.runs),game.home.runs.toString),
-         border
-       ).mkString("\n")
-     }
-
-     def players(gameTeam: GameTeam): String = {
-       gameTeam.team.players.map(player =>
-         f"|${player.name}%10s|${player.hits}%5s|${player.atBats}%5s|"
-       ).mkString("\n")
-     }
-   }
-
 }
-
-
