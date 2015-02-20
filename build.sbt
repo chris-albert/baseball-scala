@@ -1,4 +1,4 @@
-name := """minimal-scala"""
+name := """baseball-scala"""
 
 version := "1.0"
 
